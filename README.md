@@ -6,8 +6,9 @@ Kairo is the interaction runtime of the AMAGE ecosystem. It keeps a registry of
 controls and decides, for each input, what changed: hover, focus, pointer
 capture, keyboard gestures, lifecycle, and which regions must be redrawn. It is
 independent of any window or renderer, and the core uses no IO or native code.
-An adapter normalizes the official Bend runtime's window events into Kairo
-inputs.
+Adapters normalize window events into Kairo inputs: the official Bend
+runtime's (`base_adapter.bend`) and [Ankra](https://github.com/amage-si/ankra)'s
+native window (`ankra_adapter.bend`).
 
 **Status:** early implementation, tested with **Bend 2.0.35** on Linux
 (Hyprland with X11/XWayland). The first priority is a polished, reliable
@@ -36,10 +37,18 @@ proven progress.
 - `base_adapter.bend` converts `Base.Event` batches into Kairo inputs with a
   device scale, and filters X11 autorepeat release/press pairs for Enter and
   Space (see [Current boundaries](#current-boundaries)).
+- `ankra_adapter.bend` converts the events of Ankra's native window: pointer,
+  keys (repeats already flagged by Ankra, so no key-up waits for a later
+  poll and an idle window can wait without a deadline), window focus, resize
+  and close, with a device scale.
 
-The native suites have **41 core checks** and **11 adapter checks**: mouse,
-hover, release outside, duplicates, disabled controls, focus, keyboard,
-lifecycle, invalidation, invalid input, scale, and repeats across polls.
+The native suites have **41 core checks**, **11 Base adapter checks** and
+**10 Ankra adapter checks**: mouse, hover, release outside, duplicates,
+disabled controls, focus, keyboard, lifecycle, invalidation, invalid input,
+scale, repeats across polls, and, through Ankra's events, a click, Space with
+repeats, and Enter cancelled by losing window focus. The integrated GPU demo
+(Chromi's `examples/eco`) and Auvia's counter run on the Ankra adapter in a
+real window.
 In the Mokko demo, a real X11/XWayland window driven by synthetic X11 events
 sent only to that window showed mouse activation, Space with autorepeat pairs,
 and Enter activating exactly once each. Those were targeted synthetic events,
@@ -63,6 +72,8 @@ bend tests.bend -o build/tests
 ./build/tests --threads 2 --gpu off
 bend adapter_tests.bend -o build/adapter_tests
 ./build/adapter_tests --threads 2 --gpu off
+bend ankra_tests.bend -o build/ankra_tests      # Ankra cloned beside Kairo
+./build/ankra_tests --threads 2 --gpu off
 ```
 
 Run the button example, which replays a click, a release outside, Tab + Space
@@ -99,9 +110,9 @@ Read the [API reference](docs/api.md) or the complete
 ## Current boundaries
 
 - The official runtime does not deliver key repeat flags, timestamps, text
-  input, window focus, resize, or pointer leave. Kairo's core models all of
-  them, but through `Base` they never arrive, and blur/resize cancellation is
-  only exercised in tests.
+  input, window focus, resize, or pointer leave; through `Base` they never
+  arrive. Ankra's native window delivers repeats, window focus, resize and
+  pointer leave (not text input), so the Ankra adapter passes them on.
 - Without timestamps, the adapter delays the key-up of Enter and Space until
   the next event or poll and merges an adjacent release/press of the same key,
   also across batches. That stopped repeated activations in the X11 autorepeat
@@ -138,7 +149,8 @@ the system.
 | [nodes.bend](nodes.bend) | Registry validation, hit testing, Tab traversal, updates. |
 | [dirty.bend](dirty.bend) | Visual projections and dirty regions. |
 | [base_adapter.bend](base_adapter.bend) | `Base.Event` normalization with scale and autorepeat filtering. |
-| [tests.bend](tests.bend), [adapter_tests.bend](adapter_tests.bend) | Native checks; no display needed. |
+| [ankra_adapter.bend](ankra_adapter.bend) | Ankra native-window event normalization with scale. |
+| [tests.bend](tests.bend), [adapter_tests.bend](adapter_tests.bend), [ankra_tests.bend](ankra_tests.bend) | Native checks; no display needed. |
 | [examples/button.bend](examples/button.bend) | A scripted input sequence on one button. |
 | [docs/api.md](docs/api.md) | Types, rules, and the adapter contract. |
 
