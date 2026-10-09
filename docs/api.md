@@ -15,7 +15,7 @@ import ./Tessra/geometry.bend as G
 ## Types (`types.bend`)
 
 ```bend
-Role:    ButtonRole{} | TextRole{}
+Role:    ButtonRole{} | TextRole{} | EditRole{}
 Node{id: U32, bounds: G.Rect, label: String, role: Role, enabled: Bool, focusable: Bool}
 KeyName: TabKey{} | EnterKey{} | SpaceKey{} | EscapeKey{} | OtherKey{code: U32}
 
@@ -28,11 +28,20 @@ Input:
   KeyDown{key: KeyName, repeat: Bool, shift: Bool}
   KeyUp{key: KeyName}
   TextInput{text: String}
+  Editing{command: EditCommand}
   WindowFocus{focused: Bool}
   Resize{width: F32, height: F32}
   CloseRequested{}
 
-Action:  Activated{id} | TextDelivered{id, text} | Mounted{id} | Unmounted{id} | Closed{}
+Motion:  ByChar{} | ByWord{} | ToEdge{}
+EditCommand:
+  MoveLeft{by: Motion, select: Bool}  MoveRight{by: Motion, select: Bool}
+  DeleteBack{by: Motion}  DeleteForward{by: Motion}
+  SelectAll{}  Copy{}  Cut{}  Paste{}
+
+Action:  Activated{id} | TextDelivered{id, text} | EditRequested{id, command}
+       | EditPointer{id, x: F32, y: F32, drag: Bool}
+       | Mounted{id} | Unmounted{id} | Closed{}
 Change{state: State, actions: +List<Action>, dirty: +List<G.Rect>, layout: Bool}
 Error:   InvalidNode{id} | DuplicateId{id} | InvalidViewport{} | NotLive{}
 ```
@@ -65,14 +74,64 @@ There is no setter for `enabled`; rebuild the control with unmount/mount.
   left/top inclusive, right/bottom exclusive.
 - A primary press captures the target. Releasing activates only the same target
   under the release coordinates, even without an intermediate move.
-- Tab/Shift+Tab cycle enabled buttons and wrap. Enter and Space arm on key down
-  and activate on the matching key up; repeats and duplicate downs are ignored.
-  Keyboard input without focus is inert.
+- Tab/Shift+Tab cycle enabled buttons and editable text and wrap. Enter and
+  Space arm a focused button on key down and activate on the matching key up;
+  repeats and duplicate downs are ignored. Keyboard input without focus is
+  inert.
+- Editable text (`EditRole`) takes focus and capture but never activates: a
+  release over it, Enter and Space do nothing. A primary press on it emits
+  `EditPointer{id, x, y, False}`; while the button stays down, each valid move
+  emits `EditPointer{id, x, y, True}`, also outside its bounds.
 - Tab, Escape, `Cancel`, window blur, resize, and removing the control cancel
   pending gestures. Blur clears focus and hover.
-- `TextInput` is delivered to the focused target as `TextDelivered`.
+- `TextInput` is delivered as `TextDelivered` and `Editing{command}` as
+  `EditRequested{id, command}`, only when the window is active and the focus
+  is editable text. Otherwise both are ignored, with no change.
 - `CloseRequested` clears the registry, emits `Closed{}`, and later inputs are
   ignored.
+
+## Editing (`edit.bend`)
+
+Pure single-line editing. The application keeps one `Edit` per editable
+control, keyed by its node id, and applies Kairo's actions to it.
+
+```bend
+Edit{text: String, count: U32, caret: U32, anchor: U32}    # scalar indices
+Request: NoRequest{} | CopyText{text} | PasteText{}
+Refusal: ControlChar{code} | LineBreak{} | TooLong{limit}
+Applied{edit: Edit, text_changed: Bool, caret_changed: Bool, request: Request}
+```
+
+| Function | Contract |
+| --- | --- |
+| `empty()` | Empty text, caret 0. |
+| `of(text, limit)` | `Result<&2, &2, Refusal, Edit>` with the caret at the end. |
+| `apply(edit, command)` | `Applied` for an `EditCommand`. `caret_changed` covers the caret and the anchor. |
+| `insert(edit, text, limit)` | `Result<&2, &2, Refusal, Applied>`: replaces the selection with `text`, caret after it. |
+| `place(edit, index, extend)` | Clamps to the text, snaps back off combining marks; `extend` keeps the anchor. |
+| `selection(edit)` | `(start, end)`, `start <= end`. |
+| `selected(edit)` | The selected text. |
+| `is_mark(c)` | `c` in U+0300..U+036F. |
+| `default_limit()`, `max_limit()` | 256 and 4096. |
+
+- Caret stops: index 0, the end, and every index whose scalar is not a
+  combining mark (U+0300..U+036F). Moves and deletions go by stop, so a base
+  character and its marks act as one.
+- A word is a run of scalars other than space and NBSP. `ByWord` moves left
+  to the previous word start and right to the next word end; `ToEdge` to
+  the start or the end.
+- Without `select`, a selection collapses: `ByChar` stops at its start
+  (left) or end (right); `ByWord` and `ToEdge` move on from that edge. With
+  `select` the caret moves and the anchor stays.
+- Deletions remove the selection when there is one, otherwise from the
+  caret to the motion's target.
+- `Copy` and `Cut` request `CopyText` only with a selection; `Cut` also
+  deletes it. `Paste` requests `PasteText` and changes nothing: the
+  application reads the clipboard and calls `insert`.
+- `of` and `insert` refuse whole texts: C0 controls, DEL and C1 controls as
+  `ControlChar` (LF and CR as `LineBreak`), and a result over the limit,
+  capped at 4096, as `TooLong`. Any other scalar is accepted; whether the
+  font can draw it is the caller's check before committing.
 
 ## Invalidation (`dirty.bend`)
 

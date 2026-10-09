@@ -60,7 +60,10 @@ quality. Introduce abstractions from concrete needs.
 ## Working practice
 
 - Preserve existing work and keep the library's boundary clear: Kairo decides
-  interaction state; it does not lay out, draw, or own the window.
+  interaction state; it does not lay out, draw, or own the window. `State`
+  never holds text: an editable control's `edit.bend` `Edit` lives in the
+  application, keyed by node id. `State` is destructured positionally by
+  Mokko and Auvia, so do not change its arity.
 - Favor simple, maintainable code. Pursue fast, polished behavior with evidence.
 - A backend or component must never produce a second activation for one
   gesture. Add a regression check for every rule you change.

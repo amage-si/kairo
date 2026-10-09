@@ -15,10 +15,14 @@ mkdir -p build
 bend main.bend --check-only
 bend tests.bend -o build/tests
 ./build/tests --threads 2 --gpu off
+bend edit_tests.bend -o build/edit_tests
+./build/edit_tests --threads 2 --gpu off
 bend adapter_tests.bend -o build/adapter_tests
 ./build/adapter_tests --threads 2 --gpu off
 bend examples/button.bend -o build/button
 ./build/button --threads 2 --gpu off
+bend examples/edit.bend -o build/edit
+./build/edit --threads 2 --gpu off
 ```
 
 The tests need no display. When a change affects visible interaction, also run
