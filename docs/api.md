@@ -160,6 +160,46 @@ release/press of the same key, also across batches, into a repeat. Call
 up to one poll of latency and can merge a genuine very fast tap with the same
 pattern.
 
+## Ankra adapter (`ankra_adapter.bend`)
+
+| Function | Contract |
+| --- | --- |
+| `normalize(events, scale)` | `Result<&2, &2, String, List<&2, Input>>` for one wait's events, in order. `scale` must be finite and in `(0, 16]`. |
+| `input(event, scale)` | The Kairo inputs of one Ankra event (zero or one). |
+| `binding(code, mods)` | `Maybe<&2, EditCommand>`: the editing command of a key press, if any. |
+
+Ankra flags repeats itself, so no key-up is deferred and an idle window can
+wait without a deadline. Pointer coordinates and sizes are divided by
+`scale`; window position, exposure, visibility, entering and the wheel are
+dropped. `TextTyped{text}` and a paste's answer `Clipboard{Pasted{text}}`
+become `TextInput{text}`; the other clipboard events (`Asked`, `Lost`,
+`PasteFailed`) are the host's to serve through Ankra's `clipboard.bend` and
+are dropped.
+
+A key press (first or repeat) with a binding becomes `Editing{command}`
+instead of `KeyDown`; its key-up stays a `KeyUp`. Modifier bits are Shift 1,
+Ctrl 2, Alt 4, Super 8; Caps Lock (16) is ignored, and nothing is bound while
+Alt or Super is held. AltGr is not a modifier bit (AltGr+q arrives as `q`
+with no bits), so no binding uses it.
+
+| Keys (Ankra code) | Command |
+| --- | --- |
+| Left (63234), Right (63235) | `MoveLeft`/`MoveRight{ByChar}`; Ctrl: `ByWord`; Shift selects |
+| Home (63273), End (63275) | `MoveLeft`/`MoveRight{ToEdge}`; Shift selects |
+| Backspace (127) | `DeleteBack{ByChar}`; Ctrl: `ByWord` |
+| Delete (63272) | `DeleteForward{ByChar}`; Ctrl: `ByWord`; Shift (no Ctrl): `Cut` |
+| Ctrl+A (97), Ctrl+C (99), Ctrl+X (120), Ctrl+V (118) | `SelectAll`, `Copy`, `Cut`, `Paste` (Shift ignored) |
+| Shift+Insert, Ctrl+Insert (63271) | `Paste`, `Copy` |
+
+Ankra types nothing while Ctrl, Alt or Super is held and drops control
+characters, so Ctrl+V yields only `Paste`, and Backspace and Delete never type.
+Kairo routes `Editing` only to focused editable text, so a binding while a
+button has focus changes nothing. A dead key or compose sequence arrives as
+key-ups without presses followed by `TextTyped`; those key-ups match no armed
+key and change nothing. Letters are bound by code, which is the key's
+character with only Shift and Lock applied: on a non-Latin layout, Ctrl+C
+may arrive as another code and not copy. Keypad arrows are not bound.
+
 ## Ownership and scope
 
 All Kairo data is plain Bend data; the caller threads `State` and the

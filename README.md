@@ -53,15 +53,20 @@ proven progress.
 - `ankra_adapter.bend` converts the events of Ankra's native window: pointer,
   keys (repeats already flagged by Ankra, so no key-up waits for a later
   poll and an idle window can wait without a deadline), window focus, resize
-  and close, with a device scale.
+  and close, with a device scale. Typed text and pasted text become
+  `TextInput`, and editing keys become `Editing` commands: arrows, Home and
+  End (Shift selects, Ctrl moves by word), Backspace and Delete (Ctrl by
+  word), Ctrl+A/C/X/V, Shift+Insert, Ctrl+Insert and Shift+Delete (see the
+  [binding table](docs/api.md#ankra-adapter-ankra_adapterbend)).
 
 The native suites have **56 core checks**, **46 editing checks**, **11 Base
-adapter checks** and **10 Ankra adapter checks**: mouse, hover, release
+adapter checks** and **27 Ankra adapter checks**: mouse, hover, release
 outside, duplicates, disabled controls, focus, keyboard, lifecycle,
 invalidation, invalid input, scale, repeats across polls, routing to
 editable text, the editing commands and refusals, and, through Ankra's
-events, a click, Space with repeats, and Enter cancelled by losing window
-focus. The integrated GPU demo
+events, a click, Space with repeats, Enter cancelled by losing window
+focus, text and paste, every key binding, held Backspace, dead-key
+sequences, and a button and a field side by side. The integrated GPU demo
 (Chromi's `examples/eco`) and Auvia's counter run on the Ankra adapter in a
 real window.
 In the Mokko demo, a real X11/XWayland window driven by synthetic X11 events
@@ -141,9 +146,9 @@ Read the [API reference](docs/api.md) or the complete
 - The official runtime does not deliver key repeat flags, timestamps, text
   input, window focus, resize, or pointer leave; through `Base` they never
   arrive. Ankra's native window delivers repeats, window focus, resize and
-  pointer leave, so the Ankra adapter passes them on. Neither adapter yet
-  produces `TextInput` or `Editing` (key bindings); that waits for Ankra's
-  text input.
+  pointer leave, so the Ankra adapter passes them on, along with text,
+  pasted text and editing key bindings. The Base adapter produces no
+  `TextInput` or `Editing`.
 - Without timestamps, the adapter delays the key-up of Enter and Space until
   the next event or poll and merges an adjacent release/press of the same key,
   also across batches. That stopped repeated activations in the X11 autorepeat
@@ -204,8 +209,7 @@ the system.
 
 ## Direction
 
-Next: text input and editing key bindings through the Ankra adapter once
-Ankra delivers text, inputs for assistive actions, and a component tree with
+Next: inputs for assistive actions, and a component tree with
 clipping and scrolling. These are goals, not supported features.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development rules. The API is
