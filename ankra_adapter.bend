@@ -14,6 +14,102 @@ import ../Ankra/window.bend as A
 # (Shift+Tab also arrives as code 25). Window focus, resize and close map
 # to Kairo's own inputs; position, exposure, visibility, entering and the
 # wheel do not concern Kairo and are dropped.
+#
+# Text: Ankra's TextTyped (keys, dead keys, compose) and a paste's answer
+# (Clipboard{Pasted}) become TextInput; the other clipboard events are the
+# host's to serve through Ankra's clipboard.bend and are dropped. Editing
+# keys become Editing commands instead of KeyDown (see `binding`). Ankra
+# types no text while Ctrl, Alt or Super is held and drops control
+# characters, so Ctrl+V, Backspace and Delete never also type.
+
+def by_word(ctrl: Bool) -> T.Motion:
+  match ctrl:
+    case True{}:
+      T.ByWord{}
+    case False{}:
+      T.ByChar{}
+
+def ctrl_only(ctrl: Bool, command: T.EditCommand) -> Maybe<&2, T.EditCommand>:
+  match ctrl:
+    case True{}:
+      Some{command}
+    case False{}:
+      None{}
+
+# Delete: Shift (without Ctrl) cuts, Ctrl deletes a word.
+def delete_key(ctrl: Bool, shift: Bool) -> Maybe<&2, T.EditCommand>:
+  match ctrl:
+    case True{}:
+      Some{T.DeleteForward{T.ByWord{}}}
+    case False{}:
+      match shift:
+        case True{}:
+          Some{T.Cut{}}
+        case False{}:
+          Some{T.DeleteForward{T.ByChar{}}}
+
+# Insert: Shift pastes, Ctrl copies, alone or with both it is a plain key.
+def insert_key(shift: Bool, ctrl: Bool) -> Maybe<&2, T.EditCommand>:
+  match shift ctrl:
+    case True{} False{}:
+      Some{T.Paste{}}
+    case False{} True{}:
+      Some{T.Copy{}}
+    case _ _:
+      None{}
+
+# Codes follow Ankra/keys.bend (Base's convention); letters arrive in
+# lower case with or without Shift and Caps Lock.
+def binding.key(+code: U32, shift: Bool, ctrl: Bool) -> Maybe<&2, T.EditCommand>:
+  match code:
+    case 63234: # Left
+      Some{T.MoveLeft{by_word(ctrl), shift}}
+    case 63235: # Right
+      Some{T.MoveRight{by_word(ctrl), shift}}
+    case 63273: # Home
+      Some{T.MoveLeft{T.ToEdge{}, shift}}
+    case 63275: # End
+      Some{T.MoveRight{T.ToEdge{}, shift}}
+    case 127: # Backspace
+      Some{T.DeleteBack{by_word(ctrl)}}
+    case 63272: # Delete
+      delete_key(ctrl, shift)
+    case 63271: # Insert
+      insert_key(shift, ctrl)
+    case 97: # A
+      ctrl_only(ctrl, T.SelectAll{})
+    case 99: # C
+      ctrl_only(ctrl, T.Copy{})
+    case 120: # X
+      ctrl_only(ctrl, T.Cut{})
+    case 118: # V
+      ctrl_only(ctrl, T.Paste{})
+    case _:
+      None{}
+
+def binding.plain(plain: Bool, +code: U32, +mods: U32) -> Maybe<&2, T.EditCommand>:
+  match plain:
+    case True{}:
+      binding.key(code, U32.is_ne((mods .&. 1 : U32), 0), U32.is_ne((mods .&. 2 : U32), 0))
+    case False{}:
+      None{}
+
+# The editing command of a key press (repeats included), from Ankra's code
+# and modifier bits (Shift 1, Ctrl 2, Alt 4, Super 8; Caps Lock ignored):
+# Left/Right/Home/End move (Shift selects, Ctrl moves by word on the
+# arrows), Backspace/Delete delete (Ctrl by word), Ctrl+A/C/X/V select all,
+# copy, cut and paste (Shift ignored), Shift+Insert pastes, Ctrl+Insert
+# copies, Shift+Delete cuts. Nothing is bound while Alt or Super is held.
+def binding(+code: U32, +mods: U32) -> Maybe<&2, T.EditCommand>:
+  binding.plain(U32.is_eq((mods .&. 12 : U32), 0), code, mods)
+
+def key_down(b: Maybe<&2, T.EditCommand>, +code: U32, repeat: Bool, +mods: U32) -> List<&2, T.Input>:
+  match b:
+    case Some{command}:
+      [T.Editing{command}]
+    case None{}:
+      [T.KeyDown{B.key_name(code), repeat,
+        U32.is_ne((mods .&. 1 : U32), 0) || U32.is_eq(code, 25)}]
 
 def logical(+v: F32, +scale: F32) -> F32:
   (v / scale : F32)
@@ -26,9 +122,8 @@ def input(e: A.Input, +scale: F32) -> List<&2, T.Input>:
       [T.WindowFocus{g}]
     case A.CloseRequested{}:
       [T.CloseRequested{}]
-    case A.KeyDown{+code, repeat, mods}:
-      [T.KeyDown{B.key_name(code), repeat,
-        U32.is_ne((mods .&. 1 : U32), 0) || U32.is_eq(code, 25)}]
+    case A.KeyDown{+code, repeat, +mods}:
+      key_down(binding(code, mods), code, repeat, mods)
     case A.KeyUp{code, mods}:
       [T.KeyUp{B.key_name(code)}]
     case A.PointerMoved{x, y}:
@@ -39,6 +134,10 @@ def input(e: A.Input, +scale: F32) -> List<&2, T.Input>:
       [T.PointerUp{logical(x, scale), logical(y, scale), b}]
     case A.PointerLeft{}:
       [T.PointerLeave{}]
+    case A.TextTyped{text}:
+      [T.TextInput{text}]
+    case A.Clipboard{A.Pasted{text}}:
+      [T.TextInput{text}]
     case _:
       Nil{}
 
