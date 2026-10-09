@@ -4,19 +4,39 @@ import ./nodes.bend as N
 import ./dirty.bend as D
 import ../Tessra/geometry.bend as G
 
-def move(+s: T.State, +x: F32, +y: F32) -> T.Change:
-  T.State{+nodes, h, f, c, k, target, down, live, active, w, hh} = s
-  hover = Bool.pick(U32, active && G.valid_coord(x) && G.valid_coord(y), N.hit(nodes, x, y), 0)
-  D.finish(s, T.State{nodes, hover, f, c, k, target, down, live, active, w, hh}, Nil{})
+# A pointer action for editable text; `ok` says the control is editable.
+def pointer_action(ok: Bool, id: U32, x: F32, y: F32, drag: Bool) -> +List<T.Action>:
+  match ok:
+    case False{}:
+      Nil{}
+    case True{}:
+      [T.EditPointer{id, x, y, drag}]
 
-def press_allowed(ok: Bool, +s: T.State, x: F32, y: F32) -> T.Change:
+# While the primary button is down, a move over (or outside) captured
+# editable text extends its selection. The registry is scanned only then.
+def drag(dragging: Bool, +nodes: +List<T.Node>, +c: U32, x: F32, y: F32) -> +List<T.Action>:
+  match dragging:
+    case False{}:
+      Nil{}
+    case True{}:
+      pointer_action(N.editable(nodes, c), c, x, y, True{})
+
+def move(+s: T.State, +x: F32, +y: F32) -> T.Change:
+  T.State{+nodes, h, f, +c, k, target, +down, live, +active, w, hh} = s
+  +valid = active && G.valid_coord(x) && G.valid_coord(y)
+  hover = Bool.pick(U32, valid, N.hit(nodes, x, y), 0)
+  actions = drag(valid && down && U32.is_ne(c, 0), nodes, c, x, y)
+  D.finish(s, T.State{nodes, hover, f, c, k, target, down, live, active, w, hh}, actions)
+
+def press_allowed(ok: Bool, +s: T.State, +x: F32, +y: F32) -> T.Change:
   match ok:
     case False{}:
       D.unchanged(s)
     case True{}:
       T.State{+nodes, h, f, c, k, target, d, live, active, w, hh} = s
       +hit = N.hit(nodes, x, y)
-      D.finish(s, T.State{nodes, hit, hit, hit, 0, 0, True{}, live, active, w, hh}, Nil{})
+      actions = pointer_action(N.editable(nodes, hit), hit, x, y, False{})
+      D.finish(s, T.State{nodes, hit, hit, hit, 0, 0, True{}, live, active, w, hh}, actions)
 
 def press(+s: T.State, +x: F32, +y: F32, button: U32) -> T.Change:
   T.State{nodes, h, f, c, k, target, down, live, active, w, hh} = s
@@ -29,6 +49,14 @@ def activation(ok: Bool, id: U32) -> +List<T.Action>:
     case True{}:
       Con{T.Activated{id}, Nil{}}
 
+# Only a button activates; releasing over captured editable text does not.
+def button_activation(ok: Bool, +nodes: +List<T.Node>, +id: U32) -> +List<T.Action>:
+  match ok:
+    case False{}:
+      Nil{}
+    case True{}:
+      activation(N.activatable(nodes, id), id)
+
 def release_allowed(ok: Bool, +s: T.State, +x: F32, +y: F32) -> T.Change:
   match ok:
     case False{}:
@@ -36,7 +64,7 @@ def release_allowed(ok: Bool, +s: T.State, +x: F32, +y: F32) -> T.Change:
     case True{}:
       T.State{+nodes, h, f, +c, k, target, down, live, active, w, hh} = s
       +hit = Bool.pick(U32, G.valid_coord(x) && G.valid_coord(y), N.hit(nodes, x, y), 0)
-      actions = activation(U32.is_ne(c, 0) && U32.is_eq(c, hit), c)
+      actions = button_activation(U32.is_ne(c, 0) && U32.is_eq(c, hit), nodes, c)
       D.finish(s, T.State{nodes, hit, f, 0, k, target, False{}, live, active, w, hh}, actions)
 
 def release(+s: T.State, x: F32, y: F32, button: U32) -> T.Change:
@@ -73,9 +101,19 @@ def arm_allowed(ok: Bool, +s: T.State, code: U32) -> T.Change:
       T.State{nodes, h, +f, c, k, t, d, live, active, w, hh} = s
       D.finish(s, T.State{nodes, h, f, c, code, f, d, live, active, w, hh}, Nil{})
 
+# Enter and Space arm only a focused button: on editable text they are
+# ordinary keys (Space arrives as text) and never activate.
+def arm_button(ok: Bool, +s: T.State, code: U32) -> T.Change:
+  match ok:
+    case False{}:
+      D.unchanged(s)
+    case True{}:
+      T.State{+nodes, h, +f, c, k, t, d, live, active, w, hh} = s
+      arm_allowed(N.activatable(nodes, f), s, code)
+
 def arm(+s: T.State, +code: U32) -> T.Change:
   T.State{nodes, h, f, c, k, t, down, live, active, w, hh} = s
-  arm_allowed(U32.is_ne(code, 0) && U32.is_ne(f, 0) && U32.is_eq(k, 0) && Bool.not(down), s, code)
+  arm_button(U32.is_ne(code, 0) && U32.is_ne(f, 0) && U32.is_eq(k, 0) && Bool.not(down), s, code)
 
 def key_down_fresh(key: T.KeyName, s: T.State, shift: Bool) -> T.Change:
   match key:
@@ -140,9 +178,22 @@ def text_allowed(ok: Bool, s: T.State, id: U32, text: String) -> T.Change:
     case True{}:
       T.Change{s, [T.TextDelivered{id, text}], Nil{}, False{}}
 
+# Text goes only to focused editable text; a focused button ignores it.
 def text_input(+s: T.State, text: String) -> T.Change:
-  T.State{nodes, h, +f, c, k, t, d, live, active, w, hh} = s
-  text_allowed(active && U32.is_ne(f, 0), s, f, text)
+  T.State{+nodes, h, +f, c, k, t, d, live, active, w, hh} = s
+  text_allowed(active && U32.is_ne(f, 0) && N.editable(nodes, f), s, f, text)
+
+def editing_allowed(ok: Bool, s: T.State, id: U32, command: T.EditCommand) -> T.Change:
+  match ok:
+    case False{}:
+      D.unchanged(s)
+    case True{}:
+      T.Change{s, [T.EditRequested{id, command}], Nil{}, False{}}
+
+# Editing commands go only to focused editable text, like text input.
+def editing(+s: T.State, command: T.EditCommand) -> T.Change:
+  T.State{+nodes, h, +f, c, k, t, d, live, active, w, hh} = s
+  editing_allowed(active && U32.is_ne(f, 0) && N.editable(nodes, f), s, f, command)
 
 def close(s: T.State) -> T.Change:
   T.State{nodes, h, f, c, k, t, d, live, active, w, hh} = s
@@ -166,6 +217,8 @@ def route(event: T.Input, s: T.State) -> T.Change:
       key_up(s, k)
     case T.TextInput{text}:
       text_input(s, text)
+    case T.Editing{command}:
+      editing(s, command)
     case T.WindowFocus{active}:
       window_focus(s, active)
     case T.Resize{w, h}:

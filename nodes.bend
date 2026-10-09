@@ -8,10 +8,36 @@ def is_button(role: T.Role) -> Bool:
       True{}
     case T.TextRole{}:
       False{}
+    case T.EditRole{}:
+      False{}
 
+def is_edit(role: T.Role) -> Bool:
+  match role:
+    case T.EditRole{}:
+      True{}
+    case _:
+      False{}
+
+# Buttons and editable text take focus, pointer capture and hit tests.
 def eligible(n: T.Node) -> Bool:
-  T.Node{id, rect, label, role, enabled, focusable} = n
-  enabled && focusable && is_button(role)
+  T.Node{id, rect, label, +role, enabled, focusable} = n
+  enabled && focusable && (is_button(role) || is_edit(role))
+
+# Whether `id` names an eligible control of the role `edit` selects:
+# editable text when True, a button when False. Absent ids answer False.
+def eligible_as(nodes: +List<T.Node>, +id: U32, +edit: Bool) -> Bool:
+  match nodes:
+    case Nil{}:
+      False{}
+    case Con{+n, rest}:
+      T.Node{other, r, l, +role, e, f} = n
+      Bool.pick(Bool, U32.is_eq(other, id), eligible(n) && Bool.pick(Bool, edit, is_edit(role), is_button(role)), eligible_as(rest, id, edit))
+
+def editable(nodes: +List<T.Node>, +id: U32) -> Bool:
+  eligible_as(nodes, id, True{})
+
+def activatable(nodes: +List<T.Node>, +id: U32) -> Bool:
+  eligible_as(nodes, id, False{})
 
 def has(nodes: +List<T.Node>, +id: U32) -> Bool:
   match nodes:

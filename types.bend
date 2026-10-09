@@ -4,6 +4,7 @@ import ../Tessra/geometry.bend as G
 type Role is Data:
   ButtonRole{}
   TextRole{}
+  EditRole{}
 
 type Node is Data:
   Node{id: U32, bounds: G.Rect, label: String, role: Role, enabled: Bool, focusable: Bool}
@@ -15,6 +16,27 @@ type KeyName is Data:
   EscapeKey{}
   OtherKey{code: U32}
 
+# How far a caret move or a deletion reaches. ByChar steps one caret stop
+# (a base character with its combining marks), ByWord to the next word edge
+# (words are runs of characters other than space and NBSP), ToEdge to the
+# start or the end of the text.
+type Motion is Data:
+  ByChar{}
+  ByWord{}
+  ToEdge{}
+
+# A text-editing command for the focused editable control. Adapters map key
+# bindings to these; Kairo routes them, and edit.bend applies them.
+type EditCommand is Data:
+  MoveLeft{by: Motion, select: Bool}
+  MoveRight{by: Motion, select: Bool}
+  DeleteBack{by: Motion}
+  DeleteForward{by: Motion}
+  SelectAll{}
+  Copy{}
+  Cut{}
+  Paste{}
+
 # Button 0 is primary, 1 secondary, 2 middle; backends normalize here.
 type Input is Data:
   PointerMove{x: F32, y: F32}
@@ -25,6 +47,7 @@ type Input is Data:
   KeyDown{key: KeyName, repeat: Bool, shift: Bool}
   KeyUp{key: KeyName}
   TextInput{text: String}
+  Editing{command: EditCommand}
   WindowFocus{focused: Bool}
   Resize{width: F32, height: F32}
   CloseRequested{}
@@ -32,6 +55,8 @@ type Input is Data:
 type Action is Data:
   Activated{id: U32}
   TextDelivered{id: U32, text: String}
+  EditRequested{id: U32, command: EditCommand}
+  EditPointer{id: U32, x: F32, y: F32, drag: Bool}
   Mounted{id: U32}
   Unmounted{id: U32}
   Closed{}

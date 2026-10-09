@@ -92,6 +92,47 @@ def tab() -> T.Input:
 def space() -> T.Input:
   T.KeyDown{T.SpaceKey{}, False{}, False{}}
 
+# A button (1) followed by editable text (5) in Tab order.
+def field() -> T.Node:
+  T.Node{5, G.Rect{10.0, 60.0, 200.0, 30.0}, "Name", T.EditRole{}, True{}, True{}}
+
+def field_fixture() -> T.State:
+  T.State{[button(1, 10.0, True{}), field()], 0, 0, 0, 0, 0, False{}, True{}, True{}, 400.0, 200.0}
+
+def field_count(events: +List<T.Input>) -> U32:
+  clicks(run(events, Trace{field_fixture(), 0, 0}))
+
+def in_field() -> T.Input:
+  T.PointerDown{50.0, 70.0, 0}
+
+def pointer(change: T.Change, +drag: Bool) -> Bool:
+  match change:
+    case T.Change{s, Con{T.EditPointer{5, x, y, d}, Nil{}}, dirty, l}:
+      Bool.not(Bool.xor(d, drag))
+    case _:
+      False{}
+
+def no_actions(change: T.Change) -> Bool:
+  match change:
+    case T.Change{s, Nil{}, dirty, l}:
+      True{}
+    case _:
+      False{}
+
+def delivered(change: T.Change) -> Bool:
+  match change:
+    case T.Change{s, Con{T.TextDelivered{5, text}, Nil{}}, Nil{}, False{}}:
+      String.eq(text, "a")
+    case _:
+      False{}
+
+def requested(change: T.Change) -> Bool:
+  match change:
+    case T.Change{s, Con{T.EditRequested{5, T.SelectAll{}}, Nil{}}, Nil{}, False{}}:
+      True{}
+    case _:
+      False{}
+
 def main() -> IO(Unit):
   do IO<Unit>:
     A.expect(Bool.not(fail_init(K.init(nodes(), 400.0, 200.0))), "fixture validates")
@@ -135,4 +176,19 @@ def main() -> IO(Unit):
     A.expect(U32.is_eq(region_count(K.set_label(fixture(), 1, "New label")), 1), "changed label dirties one control")
     A.expect(no_change(K.dispatch(fixture(), T.PointerDown{20.0, 20.0, 1})), "secondary one is ignored")
     A.expect(U32.is_eq(count([down(), up(), down(), up(), tab(), space(), T.KeyUp{T.SpaceKey{}}]), 3), "deterministic total click count")
-    IO.print("Kairo: 41 tests passed")
+    A.expect(U32.is_eq(focus(K.replay([tab(), tab()], field_fixture())), 5), "Tab reaches editable text")
+    A.expect(U32.is_eq(focus(K.replay([in_field()], field_fixture())), 5), "press focuses editable text")
+    A.expect(U32.is_eq(field_count([tab(), tab(), space(), T.KeyUp{T.SpaceKey{}}]), 0), "Space on editable text never activates")
+    A.expect(U32.is_eq(field_count([tab(), tab(), T.KeyDown{T.EnterKey{}, False{}, False{}}, T.KeyUp{T.EnterKey{}}]), 0), "Enter on editable text never activates")
+    A.expect(U32.is_eq(field_count([in_field(), T.PointerUp{50.0, 70.0, 0}]), 0), "release over editable text does not activate")
+    A.expect(U32.is_eq(field_count([tab(), space(), T.KeyUp{T.SpaceKey{}}, T.PointerDown{20.0, 20.0, 0}, T.PointerUp{20.0, 20.0, 0}]), 2), "the button beside editable text still activates")
+    A.expect(pointer(K.dispatch(field_fixture(), in_field()), False{}), "press on editable text emits a pointer action")
+    A.expect(pointer(K.dispatch(K.replay([in_field()], field_fixture()), T.PointerMove{300.0, 150.0}), True{}), "dragging from editable text emits drags, also outside")
+    A.expect(no_actions(K.dispatch(field_fixture(), T.PointerMove{50.0, 70.0})), "moving over editable text without a press is not a drag")
+    A.expect(no_actions(K.dispatch(K.replay([T.PointerDown{20.0, 20.0, 0}], field_fixture()), T.PointerMove{50.0, 70.0})), "dragging from a button emits no edit action")
+    A.expect(delivered(K.dispatch(K.replay([in_field()], field_fixture()), T.TextInput{"a"})), "text goes to focused editable text")
+    A.expect(no_change(K.dispatch(K.replay([tab()], field_fixture()), T.TextInput{"a"})), "text to a focused button is dropped")
+    A.expect(requested(K.dispatch(K.replay([in_field()], field_fixture()), T.Editing{T.SelectAll{}})), "Editing reaches focused editable text")
+    A.expect(no_change(K.dispatch(K.replay([tab()], field_fixture()), T.Editing{T.SelectAll{}})), "Editing is ignored when a button has focus")
+    A.expect(no_change(K.dispatch(K.replay([in_field(), T.WindowFocus{False{}}], field_fixture()), T.Editing{T.SelectAll{}})), "Editing is ignored after blur")
+    IO.print("Kairo: 56 tests passed")
